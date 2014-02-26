@@ -1,0 +1,79 @@
+
+
+
+name: Project 1
+thread: 4
+plugin_path: p1
+
+headers:
+    User-Agent: IE
+# sched:
+#     type: cron
+#     start_time': 
+#     day: 1
+#     hour: 1
+#     minute: 1
+#     second: 1
+initialize:
+  - type: exec
+    name: func@db
+  - type: init
+    name: DB@db
+    var: dbi
+variable:
+    key: value___value
+events:
+    start_crawl: evt_hook@db
+    finished_crawl: evt_hook@db
+    #parsed: save@dbi
+start_urls:
+    - url:
+        - http://fx.smzdm.com/
+      rule: r1
+
+# url_clear:
+#   - condition: regular expr
+#     action: remove
+#     data: q1, q2, q3
+
+rules:
+  - name: r1
+    container: div.container_faxian
+    allow_domain: 
+        - fx.smzdm.com
+    # events:
+    #     before_parse:
+    #     after_parse:
+    parsers:
+      - name: item
+        selector: div.masonryBrick
+        parsers:
+          - name: img
+            selector: div.blPic img
+            attrib: src
+          - name: store
+            selector: div.blStore
+          - name: title
+            selector: a.blTitle
+          - name: link
+            selector: a.blTitle
+            attrib: href
+            next: r2
+            with:
+                parent: this
+      - name: page
+        selector: ul.pageNav
+  - name: r2
+    container: "div#left_side"
+    parsers:
+      - name: title
+        selector: h1.con_title
+      - name: category
+        selector: div.perBoxfl a
+      - name: shop
+        selector: h2.perBox a
+      - name: recommand
+        selector: div.perBoxsc a
+      - name: reason
+        selector: div.nrBox
+
