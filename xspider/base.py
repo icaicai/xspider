@@ -7,7 +7,14 @@ class EventObject(object):
         self._events = {}
 
     def fire(self, event, *args):
-        evts = self._events.get(event)
+        evts = []
+        if type(event) is basestring:
+            event = [event]
+        for e in event:
+            es = self._events.get(e)
+            if es:
+                evts.extend(es)
+
         ret = True
         if evts:
             for evt in evts:

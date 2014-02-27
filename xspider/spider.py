@@ -14,24 +14,29 @@ from .parser import Parser
 
 
 
-class Rule(EventObject):
+class Rule(object):
 
-    def __init__(self, rules, spider):
+    def __init__(self, rules):
         self.name = rules.get('name')
         self.container = rules.get('container')
         self.allow_domain = rules.get('allow_domain')
-        self._events = rules.get('events')
+        self.events = rules.get('events')
         rps = rules.get('parsers', {})
         #print rps
         self._parsers = rps
         self._is_default = rules.get('default', False)
 
-        if 'events' in rules:
-            evts = rules['events']
-            for evt in evts:
-                func = spider.load(evts[evt])
-                if func and callable(func):
-                    self.add_listener(evt, func)
+        # if 'events' in rules:
+        #     self.events = rules['events']
+        # else:
+        #     self.events = None
+
+        # if 'events' in rules:
+        #     evts = rules['events']
+        #     for evt in evts:
+        #         func = spider.load(evts[evt])
+        #         if func and callable(func):
+        #             self.add_listener(evt, func)
 
 
     def is_allow_domain(self, url):
@@ -112,13 +117,13 @@ class Spider(EventObject):
 
         self._parser = Parser(self)
 
-
+        # 插件加载
         if self.plugin_path:
             self._loader = Loader(self.plugin_path)
-
+        # 
         if self.cfg.get('variable'):
             self._env.update(self.cfg.get('variable'))
-
+        #
         if self.cfg.get('initialize'):
             inits = self.cfg.get('initialize')
             for it in inits:
@@ -131,6 +136,31 @@ class Spider(EventObject):
 
         #print self._env
 
+
+        # 规则及事件
+        if 'rules' in cfg:
+            for rcfg in cfg['rules']:
+                name = rcfg['name']
+                #parse_rules = rule['parsers']
+                robj = Rule(rcfg)
+                self._rules[name] = robj
+                if robj.is_default() or self.default_rule is None:
+                    self.default_rule = name
+                # print 'rules -->>', name, robj.events
+                if robj.events:
+                    for en in robj.events:
+                        evt = robj.events[en]
+                        func = self.load(evt)
+                        if func and callable(func):
+                            ename = '%s_%s' % (name, en)
+
+                            self.add_listener(ename, func)
+
+        else:
+            raise Exception("No Rule")
+
+
+        # 事件
         if 'events' in self.cfg:
             evts = self.cfg['events']
             for evt in evts:
@@ -138,47 +168,34 @@ class Spider(EventObject):
                 if func and callable(func):
                     self.add_listener(evt, func)
 
-        
 
 
     def parse_cfg(self):
         # print self.cfg
-        cfgs = self.cfg
-        if 'name' in cfgs:
-            self.name = cfgs['name']
+        cfg = self.cfg
+        if 'name' in cfg:
+            self.name = cfg['name']
         else:
             self.name = self.__class__.__name__ + str(id(self))
 
-        if 'plugin_path' in cfgs:
-            self.plugin_path = os.path.join(cfgs['__basepath__'], cfgs['plugin_path'])
+        if 'plugin_path' in cfg:
+            self.plugin_path = os.path.join(cfg['__basepath__'], cfg['plugin_path'])
 
             #self.load_plugins(plugin_path)
 
-        if 'start_urls' in cfgs:
-            self.start_urls = cfgs['start_urls']
+        if 'start_urls' in cfg:
+            self.start_urls = cfg['start_urls']
             
 
-        if 'headers' in cfgs:
-            self._headers = cfgs['headers']
+        if 'headers' in cfg:
+            self._headers = cfg['headers']
         
 
         
-        if 'sched' in cfgs:
-            self._sched = cfgs['sched']
+        if 'sched' in cfg:
+            self._sched = cfg['sched']
 
 
-
-        if 'rules' in cfgs:
-            for rcfg in cfgs['rules']:
-                name = rcfg['name']
-                #parse_rules = rule['parsers']
-                robj = Rule(rcfg, self)
-                self._rules[name] = robj
-                if robj.is_default() or self.default_rule is None:
-                    self.default_rule = name
-            
-        else:
-            raise Exception("No Rule")
 
 
 
@@ -271,44 +288,60 @@ class Spider(EventObject):
 
 
     def _download_finished(self, rlt, opts):
-        self.fire('after_download', rlt, opts)
+
+        evt_name = []
+        #rule = 'rule' in opts and opts['rule'] or None
+        if opts:
+            rule_name = opts.get('rule', '')
+        else:
+            rule_name = ''
+
+        if rule_name:
+            evt_name.append('%s_after_download' % rule_name)
+        evt_name.append('after_download')
+        ret = self.fire(evt_name, rlt, opts)
+
         try:
-            if rlt.successful:
-                rule = 'rule' in opts and opts['rule'] or None
-                resp = rlt.value
-                html = resp.text
-                # print len(html)
-                code = resp.status_code
-                #parser = self.get_parser(rule)
-                ro = self.get_rule(rule)
-                rst, nxts = self._parser.parse(html, ro)
-                #if 'persist' in ro:
-                #    pass
-                    #apply(o['persist'])
+            if ret is not False:
+                if rlt.successful:
+                    
+                    resp = rlt.value
+                    html = resp.text
+                    # print len(html)
+                    code = resp.status_code
+                    #parser = self.get_parser(rule)
+                    ro = self.get_rule(rule_name)
+                    rst, nxts = self._parser.parse(html, ro)
+                    #if 'persist' in ro:
+                    #    pass
+                        #apply(o['persist'])
+                    evt_name = []
+                    if rule_name:
+                        evt_name.append('%s_after_download' % rule_name)
+                    evt_name.append('after_parse')
+                    self.fire(evt_name, rst, nxts, opts)
+                    # print '++++++++++++++'*3
+                    # #print rst
+                    # print nxts
+                    # print '++++++++++++++'*3
+                    if nxts:
+                        for nx in nxts:
+                            url = nx['url']
+                            o = nx['opts']
+                            #o = {'p': rst}
+                            if ro.is_allow_domain(url):
+                                self._download(url, o)
+                            # print '-------------add next', url
 
-                self.fire('after_parse', rst, nxts, opts)
-                # print '++++++++++++++'*3
-                # #print rst
-                # print nxts
-                # print '++++++++++++++'*3
-                if nxts:
-                    for nx in nxts:
-                        url = nx['url']
-                        o = nx['opts']
-                        #o = {'p': rst}
-                        if ro.is_allow_domain(url):
-                            self._download(url, o)
-                        # print '-------------add next', url
+                    # if rule == 'r2':
+                    #     print '11++++++++++', rst.get('shop', '').encode('gbk') #, rst.get('title', '').encode('gbk')
 
-                # if rule == 'r2':
-                #     print '11++++++++++', rst.get('shop', '').encode('gbk') #, rst.get('title', '').encode('gbk')
-
-            else:
-                if not 'retry' in opts:
-                    opts['retry'] = 0
-                opts['retry'] += 1
-                url = rlt.value.url #opts['url']
-                self._download(url, opts)
+                else:
+                    if not 'retry' in opts:
+                        opts['retry'] = 0
+                    opts['retry'] += 1
+                    url = rlt.value.url #opts['url']
+                    self._download(url, opts)
         finally:
             self._qcount -= 1
 
@@ -358,8 +391,14 @@ class Spider(EventObject):
             #     c = ArgsLink(self._download_finished, o)
             #     g.rawlink(c)
             req = self._downloader.make_request(url)
-            self.fire('before_request', req, o)
-            self._downloader.download(url, self._download_finished, o)
+
+            evt_name = []
+            if o and o.get('rule'):
+                evt_name.append('%s_before_request' % o.get('rule'))
+            evt_name.append('before_request')
+            ret = self.fire(evt_name, req, o)
+            if ret is not False:
+                self._downloader.download(url, self._download_finished, o)
         except:
             pass
         else:
@@ -380,6 +419,8 @@ class Spider(EventObject):
             if type(url) is dict:
                 rn = url.get('rule', self.default_rule)
                 ul = url.get('url')
+                if type(ul) is basestring:
+                    ul = [ul]
                 for u in ul:
                     o = {'url': u, 'rule': rn}
                     self._download(u, o)

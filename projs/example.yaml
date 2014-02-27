@@ -41,9 +41,9 @@ rules:
     container: div.container_faxian
     allow_domain: 
         - fx.smzdm.com
-    # events:
-    #     before_parse:
-    #     after_parse:
+    events:
+        after_download: evt_hook@db
+        after_parse: evt_hook@db
     parsers:
       - name: item
         selector: div.masonryBrick
