@@ -136,7 +136,7 @@ class Loader(object):
                 filename = pathname
                 pathname = os.path.dirname(pathname)
 
-            print ' +++++==> ', filename, pathname
+            # print ' +++++==> ', filename, pathname
             if code is not None:
                 mod = imp.new_module(fname) 
                 ke = env.copy()

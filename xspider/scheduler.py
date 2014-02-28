@@ -157,7 +157,11 @@ class Job(object):
             self._count += 1
 
         self._running = True
-        self._func()
+        try:
+            self._func()
+        except Exception,e:
+            self._running = False
+            raise e
 
 
 

@@ -9,7 +9,7 @@ class SpiderMan(object):
     """docstring for Manager"""
 
 
-    cfgfnreg = '*.ymal'
+    cfgfnre = '*.ymal'
 
     def __init__(self):
         super(SpiderMan, self).__init__()

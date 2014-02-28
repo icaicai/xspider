@@ -3,7 +3,7 @@
 #from base import register_filter, register_parser
 import os.path
 import urlparse
-from collections import defaultdict
+# from collections import defaultdict
 from .base import EventObject
 from .loader import Loader
 from .downloader import Downloader
@@ -100,6 +100,9 @@ class Spider(EventObject):
 
 
     def __call__(self):
+        if self._qcount > 0:
+            raise Exception('Running ......')
+
         self.fire('schedule_crawl', self)
         self.start_crawl()
 
@@ -428,4 +431,7 @@ class Spider(EventObject):
                 o = {'url': url}
                 self._download(url, o)
 
-        
+    
+    def get_info(self):
+        """"""
+        return (self._qcount, self._downloader.length, self._ccount)

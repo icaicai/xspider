@@ -33,6 +33,12 @@ class Console(object):
             else:
               s.start_crawl()
 
+
+    def start(self):
+        self._started = True
+        self._sched.start()        
+
+
     def stop(self):
         print 'Shutdown...'
         self._sched.stop()
@@ -41,12 +47,13 @@ class Console(object):
 
 
     def run(self):
-        
         print 'Running...'
-        self._sched.start()
+
+        if self._started == False:
+            self.start()
+
         #self._start_event.clear()
-        #self._start_event.wait()
-        self._started = True
+        #self._start_event.wait()        
         while self._started:
             gevent.sleep(1)
 

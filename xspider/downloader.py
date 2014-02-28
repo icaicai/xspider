@@ -41,6 +41,9 @@ class Downloader(object):
     def count(self):
         return self._count
     
+    @property
+    def length(self):
+        return len(self._pool)
 
     def make_request(self, url, method='GET', **kwargs):
         return requests.request(method, url, **kwargs)
