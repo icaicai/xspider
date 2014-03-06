@@ -15,30 +15,44 @@ class SpiderMan(object):
         super(SpiderMan, self).__init__()
         self._spiders = []
         
+    # def load(self, path = '.'):
+        
+    #     for fn in os.listdir(path):
+    #         if fn in ('.', '..'):
+    #             continue
+    #         fullpath = os.path.join(path, fn)
+    #         r, ext = os.path.splitext(fn)
+    #         if os.path.isfile(fullpath) and ext in ('.yaml', '.yml', '.json'):
+    #             txt = open(fullpath).read()
+    #             if ext == '.json':
+    #                 cfg = json.load(txt)
+    #             else:
+    #                 cfg = yaml.load(txt)
+                
+    #             # print '----------' * 3
+    #             # print cfg
+    #             # print '----------' * 3
+    #             cfg['__basepath__'] = path
+    #             s = self.init_spider(cfg)
+    #             if s:
+    #                 self._spiders.append(s)
+
+    #     return self._spiders
+
     def load(self, path = '.'):
         
         for fn in os.listdir(path):
             if fn in ('.', '..'):
                 continue
-            fullpath = os.path.join(path, fn)
+            fullpath = os.path.abspath(os.path.join(path, fn))
             r, ext = os.path.splitext(fn)
             if os.path.isfile(fullpath) and ext in ('.yaml', '.yml', '.json'):
-                txt = open(fullpath).read()
-                if ext == '.json':
-                    cfg = json.load(txt)
-                else:
-                    cfg = yaml.load(txt)
-                
-                # print '----------' * 3
-                # print cfg
-                # print '----------' * 3
-                cfg['__basepath__'] = path
-                s = self.init_spider(cfg)
+                #cfg['__basepath__'] = path
+                s = self.init_spider(fullpath)
                 if s:
                     self._spiders.append(s)
 
         return self._spiders
-
 
     def init_spider(self, cfg):
         try:

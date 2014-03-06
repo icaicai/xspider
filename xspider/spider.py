@@ -95,8 +95,12 @@ class Spider(EventObject):
         self._downloader = None
         self._headers = None
 
-        self._qcount = 0
-        self._ccount = 0
+        self._qcount = 0            #未完成的队列长度
+        self._ccount = 0            #抓取次数
+
+        self._cfg_file = None
+
+        self._dld_urls = set()    #已下载或正在下载的url
 
 
     def __call__(self):
@@ -108,9 +112,55 @@ class Spider(EventObject):
 
 
     def init(self, cfg):
+        import yaml
+        import json
+
+        if isinstance(cfg, basestring):
+            if not os.path.exists(cfg):
+                raise Exception('%s not exists' % cfg)
+
+
+            self._cfg_file = cfg
+            _, ext = os.path.splitext(cfg)
+            txt = open(cfg).read()
+            if ext == '.json':
+                cfg = json.load(txt)
+            else:
+                cfg = yaml.load(txt)
+
+            cfg['__basepath__'] = os.path.dirname(self._cfg_file)
+
+
+
+        if type(cfg) is not dict:
+            raise Exception('invalid cfg')
+
         self.cfg = cfg
         
-        self.parse_cfg()
+        #self.parse_cfg()
+        if 'name' in cfg:
+            self.name = cfg['name']
+        else:
+            self.name = self.__class__.__name__ + str(id(self))
+
+        if 'plugin_path' in cfg:
+            self.plugin_path = os.path.join(cfg['__basepath__'], cfg['plugin_path'])
+
+            #self.load_plugins(plugin_path)
+
+        if 'start_urls' in cfg:
+            self.start_urls = cfg['start_urls']
+            
+
+        if 'headers' in cfg:
+            self._headers = cfg['headers']
+        
+
+        
+        if 'sched' in cfg:
+            self._sched = cfg['sched']
+
+
 
         c = {}
         c['timeout'] = 30
@@ -173,30 +223,10 @@ class Spider(EventObject):
 
 
 
-    def parse_cfg(self):
-        # print self.cfg
-        cfg = self.cfg
-        if 'name' in cfg:
-            self.name = cfg['name']
-        else:
-            self.name = self.__class__.__name__ + str(id(self))
+    # def parse_cfg(self):
+    #     # print self.cfg
+    #     cfg = self.cfg
 
-        if 'plugin_path' in cfg:
-            self.plugin_path = os.path.join(cfg['__basepath__'], cfg['plugin_path'])
-
-            #self.load_plugins(plugin_path)
-
-        if 'start_urls' in cfg:
-            self.start_urls = cfg['start_urls']
-            
-
-        if 'headers' in cfg:
-            self._headers = cfg['headers']
-        
-
-        
-        if 'sched' in cfg:
-            self._sched = cfg['sched']
 
 
 
@@ -249,6 +279,10 @@ class Spider(EventObject):
             return getattr(obj, func, None)
         return obj
 
+    @property
+    def is_running(self):
+        return self._qcount > 0
+
     def init_env(self):
         self._env['CURRENT_SPIDER'] = self
         self._env['get_config'] = self.get_config
@@ -264,11 +298,11 @@ class Spider(EventObject):
 
 
 
-    def init_events(self):
-        pass
+    # def init_events(self):
+    #     pass
 
-    def init_parser(self):
-        pass
+    # def init_parser(self):
+    #     pass
 
     def get_rule(self, name):
         # if name not in self._rules:
@@ -385,8 +419,20 @@ class Spider(EventObject):
         #self.fire('before_download', url, o)
         
         try:
-            rule = 'rule' in o and o['rule'] or None
+            rule_name = o and o.get('rule') or None
             url = self.clear(url)
+            if not url:
+                return
+
+            if url in self._dld_urls:   #是否已经下载或正在下载
+                evt_name = []
+                if rule_name:
+                    evt_name.append('%s_reduplicated' % rule_name)
+                evt_name.append('reduplicated')
+                ret = self.fire(evt_name, url)            
+                return
+
+
             o['url'] = url
             # if url:
             #     self._size += 1
@@ -396,8 +442,8 @@ class Spider(EventObject):
             req = self._downloader.make_request(url)
 
             evt_name = []
-            if o and o.get('rule'):
-                evt_name.append('%s_before_request' % o.get('rule'))
+            if rule_name:
+                evt_name.append('%s_before_request' % rule_name)
             evt_name.append('before_request')
             ret = self.fire(evt_name, req, o)
             if ret is not False:
@@ -405,6 +451,7 @@ class Spider(EventObject):
         except:
             pass
         else:
+            self._dld_urls.add(url)
             self._qcount += 1
 
 
@@ -412,6 +459,8 @@ class Spider(EventObject):
     def start_crawl(self, urls=None):
         if urls is None:
             urls = self.start_urls
+
+        self._dld_urls.clear()   #新的开始
 
         if type(urls) is basestring:
             urls = [urls]

@@ -52,7 +52,9 @@ class Job(object):
 
 
     @property
-    def running(self):
+    def is_running(self):
+        if hasattr(self._func, 'is_running') and type(self._func.is_running) is bool:
+            return self._func.is_running
         return self._running
 
     @property
