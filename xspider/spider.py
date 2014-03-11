@@ -8,6 +8,7 @@ from .base import EventObject
 from .loader import Loader
 from .downloader import Downloader
 from .parser import Parser
+from .log import Logger
 
 
 
@@ -85,6 +86,7 @@ class Spider(EventObject):
     def __init__(self):
         super(Spider, self).__init__()
         
+
         self.plugin_path=None
         self.start_urls = []
         self.default_rule = None
@@ -101,6 +103,7 @@ class Spider(EventObject):
         self._cfg_file = None
 
         self._dld_urls = set()    #已下载或正在下载的url
+
 
 
     def __call__(self):
@@ -137,11 +140,17 @@ class Spider(EventObject):
 
         self.cfg = cfg
         
-        #self.parse_cfg()
+        
         if 'name' in cfg:
             self.name = cfg['name']
         else:
             self.name = self.__class__.__name__ + str(id(self))
+
+        self._log = Logger.get(self.name, logpath=cfg['__basepath__'])  #
+
+
+        #self.parse_cfg()
+
 
         if 'plugin_path' in cfg:
             self.plugin_path = os.path.join(cfg['__basepath__'], cfg['plugin_path'])
@@ -151,16 +160,12 @@ class Spider(EventObject):
         if 'start_urls' in cfg:
             self.start_urls = cfg['start_urls']
             
-
         if 'headers' in cfg:
             self._headers = cfg['headers']
         
 
-        
         if 'sched' in cfg:
             self._sched = cfg['sched']
-
-
 
         c = {}
         c['timeout'] = 30
@@ -206,8 +211,8 @@ class Spider(EventObject):
                         func = self.load(evt)
                         if func and callable(func):
                             ename = '%s_%s' % (name, en)
-
                             self.add_listener(ename, func)
+                            self._log.info(u"监听规则 %s 事件 %s" % (name, evt))
 
         else:
             raise Exception("No Rule")
@@ -220,14 +225,13 @@ class Spider(EventObject):
                 func = self.load(evts[evt])
                 if func and callable(func):
                     self.add_listener(evt, func)
+                    self._log.info(u"监听事件 %s" % evt)
 
 
 
     # def parse_cfg(self):
     #     # print self.cfg
     #     cfg = self.cfg
-
-
 
 
 
@@ -354,8 +358,8 @@ class Spider(EventObject):
                         #apply(o['persist'])
                     evt_name = []
                     if rule_name:
-                        evt_name.append('%s_after_download' % rule_name)
-                    evt_name.append('after_parse')
+                        evt_name.append('%s_after_parsed' % rule_name)
+                    evt_name.append('after_parsed')
                     self.fire(evt_name, rst, nxts, opts)
                     # print '++++++++++++++'*3
                     # #print rst
@@ -379,6 +383,8 @@ class Spider(EventObject):
                     opts['retry'] += 1
                     url = rlt.value.url #opts['url']
                     self._download(url, opts)
+        except:
+            self._log.exception(u'处理页面内容时出错 %s' % rlt.value.url)                    
         finally:
             self._qcount -= 1
 
@@ -387,6 +393,7 @@ class Spider(EventObject):
         if self._qcount == 0:
             self._ccount += 1
             self.fire('finished_crawl', self)
+            self._log.info(u'完成抓取 %s' % self._ccount)
 
 
     # def _download_finished2(self, g, o):
@@ -449,7 +456,7 @@ class Spider(EventObject):
             if ret is not False:
                 self._downloader.download(url, self._download_finished, o)
         except:
-            pass
+            self._log.exception(u'新增到下载队列时出错 %s' % url)
         else:
             self._dld_urls.add(url)
             self._qcount += 1
@@ -483,4 +490,5 @@ class Spider(EventObject):
     
     def get_info(self):
         """"""
-        return (self._qcount, self._downloader.length, self._ccount)
+
+        return (self._qcount, self._downloader.length, self._ccount)   #队列长度，下载中，已完成次数

@@ -1,9 +1,10 @@
-
+#coding=utf8
 
 import os
 import yaml
 import json
-from spider import Spider
+from .spider import Spider
+from .log import Logger
 
 class SpiderMan(object):
     """docstring for Manager"""
@@ -15,6 +16,7 @@ class SpiderMan(object):
         super(SpiderMan, self).__init__()
         self._spiders = []
         
+        self._log = Logger.get('SpiderMan')
     # def load(self, path = '.'):
         
     #     for fn in os.listdir(path):
@@ -61,9 +63,10 @@ class SpiderMan(object):
             # sched = proj.get_sched()
             # if sched:
             #   self._sched.add_sched(proj, sched)
+            self._log.info((u'加载 %s ( %s ) 完成' % (proj.name, cfg)))
             return proj
         except Exception, e:
-            raise
+            self._log.exception((u'解析 %s 出错' % cfg))
         else:
             pass
         finally:
