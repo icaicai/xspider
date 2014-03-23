@@ -1,0 +1,70 @@
+
+
+
+name: jd
+thread: 4
+plugin_path: jd
+
+headers:
+    User-Agent: IE
+# sched:
+#     type: cron
+#     start_time': 
+#     day: 1
+#     hour: 1
+#     minute: 1
+#     second: 1
+# initialize:
+#   - type: exec
+#     name: func@db
+#   - type: init
+#     name: DB@db
+#     var: dbi
+# variable:
+#     key: value___value
+# events:
+#     start_crawl: evt_hook@db
+#     finished_crawl: evt_hook@db
+#     #parsed: save@dbi
+start_urls:
+    - http://www.jd.com/
+
+# url_clear:
+#   - match: url regular
+#     remove: 
+#     replace:
+#   - condition: regular expr
+#     action: remove
+#     data: q1, q2, q3
+allow_domain:
+  - item.jd.com
+  - list.jd.com
+parsers:
+  - name: r1
+    match:
+        host_eq: item.jd.com
+    # allow_domain: 
+    #     - fx.smzdm.com
+    events:
+        # after_download: evt_hook@db
+        after_parsed: save_product@jd
+    rules:
+      - name: item-info
+        selector: head script[type="text/javascript"]
+        handler: parse_item_info@jd
+      - name: _name
+        selector: "div#name h1"
+  - name: r2
+    container: "div#left_side"
+    rules:
+      - name: title
+        selector: h1.con_title
+      - name: category
+        selector: div.perBoxfl a
+      - name: shop
+        selector: h2.perBox a
+      - name: recommand
+        selector: div.perBoxsc a
+      - name: reason
+        selector: div.nrBox
+

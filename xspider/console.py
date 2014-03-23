@@ -42,6 +42,7 @@ class Console(object):
     def stop(self):
         print 'Shutdown...'
         self._sched.stop()
+        self._spiderman.stop()
         #self._start_event.set()
         self._started = False
 

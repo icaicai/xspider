@@ -6,6 +6,7 @@ from gevent import pool
 from gevent.greenlet import SpawnedLink
 from gevent.hub import greenlet, getcurrent, get_hub
 import requests
+# from .log import Logger
 
 DownloadResult = namedtuple('DownloadResult', 'successful, value, exception')
 
@@ -29,9 +30,21 @@ class Downloader(object):
     
     def __init__(self, cfg):
         self.cfg = cfg
-        self.sessions = {}
+        #self.sessions = {}
+        self.session = requests.Session()
         self.timeout = cfg.get('timeout')
         self.headers = cfg.get('headers')
+
+        self.session.headers = self.headers
+
+
+        # _log_prefix = cfg.get('log_prefix')
+        # if _log_prefix:
+        #     log_name = '%s.Downloader' % _log_prefix
+        
+        #     self._log = Logger.get_logger(log_name)
+        # else:
+        #     self._log = None
 
         self._count = 0
 
@@ -46,25 +59,29 @@ class Downloader(object):
         return len(self._pool)
 
     def make_request(self, url, method='GET', **kwargs):
-        return requests.request(method, url, **kwargs)
+        return requests.Request(method, url, **kwargs)
 
-    def download(self, url, callback=None, opts=None):
+    def download(self, req, callback=None, opts=None):
         self._count += 1
         o = {'callback': callback, 'opts': opts}
-        g = self._pool.spawn(self._download, url, opts)
+        g = self._pool.spawn(self._download, req, opts)
         c = ArgsLink(self._done, o)
         g.rawlink(c)
 
         return g
 
-    def _download(self, url, opts):
-        u = urlparse(url)
-        if u.netloc not in self.sessions:
-            sess = requests.Session()
-            sess.headers = self.headers
-            self.sessions[u.netloc] = sess
-        sess = self.sessions[u.netloc]
-        return sess.request('GET', url, timeout=self.timeout)
+    def _download(self, req, opts=None):
+        if isinstance(req, basestring):
+            req = self.make_request(req)
+        # u = urlparse(url)
+        # if u.netloc not in self.sessions:
+        #     sess = requests.Session()
+        #     sess.headers = self.headers
+        #     self.sessions[u.netloc] = sess
+        # sess = self.sessions[u.netloc]
+        # return sess.request('GET', url, timeout=self.timeout)
+        preq = self.session.prepare_request(req)
+        return self.session.send(preq)
 
     def _done(self, g, o):
         self._count -= 1

@@ -75,3 +75,7 @@ class SpiderMan(object):
     def get_spiders(self):
         return self._spiders
 
+
+    def stop(self):
+        for spider in self._spiders:
+            spider.stop()
