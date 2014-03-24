@@ -20,6 +20,15 @@ class ParseRule(object):
 
         self._log = Logger.get(spider.name)
 
+        self.parse_handler = None
+        if 'parse_handler' in rules:
+            func = spider.load(rules['parse_handler'])
+            if func:
+                self.parse_handler = func
+
+            del rules['parse_handler']
+
+
         rps = rules.get('rules', {})
         #print rps
         self._rules = self._validate(rps, spider)
@@ -117,6 +126,7 @@ class ParseRule(object):
             #     continue
             if not ('value' in rule or 'selector' in rule):
                 continue
+
             
             if 'handler' in rule:
                 func = spider.load(rule['handler'])
@@ -198,23 +208,34 @@ class Parser(object):
         return None
 
 
-    def parse(self, text, url, rule):
+    def parse(self, resp, rule):
         # rtn = self.fire('before_parse', text)
         # if rtn === False:
         #     return
         # elif rtn:
         #     text = rtn
         # print 'html == >', len(text), type(text)
-        # text = resp.text
-        doc = html.document_fromstring(text)
-        doc.make_links_absolute(doc.base_url or url)
-
-
-        links = self._get_links(doc, rule and rule.allow_domain or None)
         if rule:
-            result = self._parse(doc, rule.rules())
+            print rule.name, rule.parse_handler
+            print resp
+        if rule and rule.parse_handler:
+            r = rule.parse_handler(resp, rule)
+            if type(r) in (tuple, list) and len(r) == 2:
+                result, links = r
+            else:
+                result, links = r, None
         else:
-            result = None
+            text = resp.text
+            url = resp.url
+            doc = html.document_fromstring(text)
+            doc.make_links_absolute(doc.base_url or url)
+
+
+            links = self._get_links(doc, rule and rule.allow_domain or None)
+            if rule:
+                result = self._parse(doc, rule.rules())
+            else:
+                result = None
 
         return result, links
 

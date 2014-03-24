@@ -54,6 +54,12 @@ parsers:
         handler: parse_item_info@jd
       - name: _name
         selector: "div#name h1"
+  - name: price
+    match:
+        host_eq: p.3.cn
+    events:
+        after_parsed: save_product_to@jd
+    parse_handler: parse_price@jd
   - name: r2
     container: "div#left_side"
     rules:

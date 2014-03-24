@@ -272,9 +272,10 @@ class Spider(EventObject):
                 ret = self.fire(evt_name, rlt, opts)
 
                 html = resp.text
-                result, links = self._parser.parse(resp.text, resp.url, rule)
+                result, links = self._parser.parse(resp, rule)
 
-                self._download_links(links, {'referer': url})
+                if links:
+                    self._download_links(links, {'referer': url})
                 # fp = open('urls.txt', 'w')
                 # fp.write('\n'.join(links))
                 # fp.close()

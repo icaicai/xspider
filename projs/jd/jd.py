@@ -58,8 +58,31 @@ def parse_item_info(nodes, name, values, item):
 def save_product(result, opts):
     print '---------------------------------------------------------'
     print result
+    skus = result['skuid']
+    url = 'http://p.3.cn/prices/mgets?skuIds=J_%s&type=1' % skus #(',J_'.join(skus))
+    o = {'prod-data': result, 'referer': opts.get('url')}
+    print url
+    _download(url, o)
     print '---------------------------------------------------------'
 
+def parse_price(resp, rule):
+    print '++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    print resp.text
+    jscode = resp.text  #[{'p': '769.00', 'm': '859.00', 'id': 'J_954086'}]
+    obj = Global()
+    info = None
+    with PyV8.JSContext(obj) as ctx:
+        c = ctx.eval(jscode)
+        info =  PyV8.convert(c)
+        print  info
+    print '++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    return info
+
+def save_product_to(result, opts):
+    print '^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^'
+    print result
+    print opts
+    print '^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^'
 
 
 '''
