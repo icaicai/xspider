@@ -1,7 +1,9 @@
 
 
+import time
 from urlparse import urlparse
 from collections import namedtuple
+import gevent
 from gevent import pool
 from gevent.greenlet import SpawnedLink
 from gevent.hub import greenlet, getcurrent, get_hub
@@ -35,6 +37,12 @@ class Downloader(object):
         self.timeout = cfg.get('timeout')
         self.headers = cfg.get('headers')
 
+        self.interval = cfg.get('interval', None)
+        if self.interval:
+            self.interval = self.interval / 1000.0
+        # print 'Downloader', self.interval
+        self._last = 0
+
         self.session.headers = self.headers
 
 
@@ -61,10 +69,13 @@ class Downloader(object):
     def make_request(self, url, method='GET', **kwargs):
         return requests.Request(method, url, **kwargs)
 
-    def download(self, req, callback=None, opts=None):
+    def download(self, req, callback=None, opts=None, immediate=False):
         self._count += 1
         o = {'callback': callback, 'opts': opts}
-        g = self._pool.spawn(self._download, req, opts)
+        if immediate:
+            g = gevent.spawn(self._download, req, opts)
+        else:
+            g = self._pool.spawn(self._download, req, opts)
         c = ArgsLink(self._done, o)
         g.rawlink(c)
 
@@ -73,6 +84,12 @@ class Downloader(object):
     def _download(self, req, opts=None):
         if isinstance(req, basestring):
             req = self.make_request(req)
+
+        if self.interval:
+            while (self._last + self.interval) > time.time():
+                gevent.sleep(self._last + self.interval - time.time() + 0.01)
+                # gevent.sleep(.05)
+            self._last = time.time()
         # u = urlparse(url)
         # if u.netloc not in self.sessions:
         #     sess = requests.Session()
@@ -80,6 +97,7 @@ class Downloader(object):
         #     self.sessions[u.netloc] = sess
         # sess = self.sessions[u.netloc]
         # return sess.request('GET', url, timeout=self.timeout)
+        # print 'DD ==>> ', time.time(), req.url
         preq = self.session.prepare_request(req)
         return self.session.send(preq)
 

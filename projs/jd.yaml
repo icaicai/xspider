@@ -4,7 +4,9 @@
 name: jd
 thread: 4
 plugin_path: jd
-
+max_retry: 3
+max_deep: 0
+interval: 100
 headers:
     User-Agent: IE
 # sched:

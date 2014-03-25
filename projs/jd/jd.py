@@ -62,7 +62,7 @@ def save_product(result, opts):
     url = 'http://p.3.cn/prices/mgets?skuIds=J_%s&type=1' % skus #(',J_'.join(skus))
     o = {'prod-data': result, 'referer': opts.get('url')}
     print url
-    _download(url, o)
+    _download(url, o, True)
     print '---------------------------------------------------------'
 
 def parse_price(resp, rule):

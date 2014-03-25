@@ -83,7 +83,8 @@ class Spider(EventObject):
 
 
         #self.parse_cfg()
-        self.max_retry = cfg.get('retry', 3)
+        self.max_retry = cfg.get('max_retry', 3)
+        self.max_retry = cfg.get('max_deep', 3)
 
 
         if 'plugin_path' in cfg:
@@ -124,8 +125,10 @@ class Spider(EventObject):
         # 下载
         c = {}
         c['timeout'] = 30
+        c['interval'] = cfg.get('interval')
         if 'headers' in cfg:
             c['headers'] = cfg['headers']
+
         print 'Downloader header ------------->', c
         self._downloader = Downloader(c)
 
@@ -323,7 +326,7 @@ class Spider(EventObject):
             self._download(url, o.copy())
             # return
 
-    def _download(self, url, o=None):
+    def _download(self, url, o=None, immediate=False):
         #self.fire('before_download', url, o)
         
         try:
@@ -350,7 +353,7 @@ class Spider(EventObject):
 
             ret = self.fire('before_request', req, o)
             if ret is not False:
-                self._downloader.download(req, self._download_finished, o)
+                g = self._downloader.download(req, self._download_finished, o, immediate)
         except:
             self._log.exception(u'新增到下载队列时出错 %s' % url)
         else:
