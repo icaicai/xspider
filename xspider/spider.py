@@ -3,6 +3,8 @@
 #from base import register_filter, register_parser
 import os.path
 import urlparse
+from gevent.greenlet import SpawnedLink
+from gevent.hub import greenlet, getcurrent, get_hub
 # from collections import defaultdict
 from .base import EventObject
 from .loader import Loader
@@ -11,6 +13,21 @@ from .parser import Parser, ParseRule
 from .log import Logger
 
 
+
+
+class ArgsLink(SpawnedLink):
+
+    def __init__(self, callback, *args, **kwargs):
+        super(ArgsLink, self).__init__(callback)
+        self._args = args
+        self._kwargs = kwargs
+        # print 'c$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
+
+    def __call__(self, source):
+        # print '$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
+        g = greenlet(self.callback, get_hub())
+        self._args = (source, ) + self._args
+        g.switch(*self._args, **self._kwargs)
 
 
 
@@ -30,7 +47,7 @@ class Spider(EventObject):
         self._downloader = None
         self._headers = None
 
-        self._qcount = 0            #未完成的队列长度
+        # self._qcount = 0            #未完成的队列长度
         self._ccount = 0            #抓取次数
 
         self._cfg_file = None
@@ -40,7 +57,8 @@ class Spider(EventObject):
 
 
     def __call__(self):
-        if self._qcount > 0:
+        # if self._qcount > 0:
+        if self._downloader.qsize > 0:
             raise Exception('Running ......')
 
         self.fire('schedule_crawl', self)
@@ -84,7 +102,7 @@ class Spider(EventObject):
 
         #self.parse_cfg()
         self.max_retry = cfg.get('max_retry', 3)
-        self.max_retry = cfg.get('max_deep', 3)
+        self.max_deep = cfg.get('max_deep', 3)
 
 
         if 'plugin_path' in cfg:
@@ -230,7 +248,7 @@ class Spider(EventObject):
 
     @property
     def is_running(self):
-        return self._qcount > 0
+        return self._downloader.qsize > 0
 
 
     # def guess_rule(self, url):
@@ -249,13 +267,13 @@ class Spider(EventObject):
 
 
     def _download_finished(self, rlt, opts):
-
+        # print '------------------------_download_finished----------------------------'
         resp = None
         exce = None
         url = None
 
         try:
-            if rlt.successful: #下载成功
+            if rlt.successful(): #下载成功
                 resp = rlt.value
                 url = resp.url
 
@@ -309,13 +327,14 @@ class Spider(EventObject):
                         self._download(url, opts)                
         except:
             self._log.exception(u'处理内容时出错 %s' % opts.get('url'))    
-        finally:
-            self._qcount -= 1
+        # finally:
+        #     self._qcount -= 1
 
 
-        print '-------------++++++++++++++++', self._qcount, self._ccount
+        # print '-------------++++++++++++++++', self._qcount, self._ccount
 
-        if self._qcount == 0:
+        # if self._qcount == 0:
+        if self._downloader.qsize == 0:
             self._ccount += 1
             self.fire('finished_crawl', self)
             self._log.info(u'完成抓取 %s' % self._ccount)
@@ -353,12 +372,16 @@ class Spider(EventObject):
 
             ret = self.fire('before_request', req, o)
             if ret is not False:
-                g = self._downloader.download(req, self._download_finished, o, immediate)
+                # g = self._downloader.download(req, self._download_finished, o, immediate)
+                g = self._downloader.download(req)
+                c = ArgsLink(self._download_finished, o)
+                g.rawlink(c)
+                # print g
         except:
             self._log.exception(u'新增到下载队列时出错 %s' % url)
         else:
             self._dld_urls.add(url)
-            self._qcount += 1
+            # self._qcount += 1
 
 
 
@@ -384,4 +407,4 @@ class Spider(EventObject):
     
     def get_info(self):
         """"""
-        return (self._qcount, self._downloader.length, self._ccount)   #队列长度，下载中，已完成次数
+        return (self._downloader.qsize, self._ccount)   #队列长度，下载中，已完成次数

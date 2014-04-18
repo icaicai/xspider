@@ -6,7 +6,7 @@ thread: 4
 plugin_path: jd
 max_retry: 3
 max_deep: 0
-interval: 100
+interval: 1000
 headers:
     User-Agent: IE
 # sched:
@@ -56,6 +56,8 @@ parsers:
         handler: parse_item_info@jd
       - name: _name
         selector: "div#name h1"
+      - name: _p
+        selector: "div#product-promotions"
   - name: price
     match:
         host_eq: p.3.cn

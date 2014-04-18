@@ -215,9 +215,9 @@ class Parser(object):
         # elif rtn:
         #     text = rtn
         # print 'html == >', len(text), type(text)
-        if rule:
-            print rule.name, rule.parse_handler
-            print resp
+        # if rule:
+        #     print rule.name, rule.parse_handler
+        #     print resp
         if rule and rule.parse_handler:
             r = rule.parse_handler(resp, rule)
             if type(r) in (tuple, list) and len(r) == 2:

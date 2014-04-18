@@ -5,6 +5,7 @@ from urlparse import urlparse
 from collections import namedtuple
 import gevent
 from gevent import pool
+# from gevent import threadpool, queue
 from gevent.greenlet import SpawnedLink
 from gevent.hub import greenlet, getcurrent, get_hub
 import requests
@@ -22,10 +23,32 @@ class ArgsLink(SpawnedLink):
         #print '$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
 
     def __call__(self, source):
-        #print '$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
+        # print '$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
         g = greenlet(self.callback, get_hub())
         self._args = (source, ) + self._args
         g.switch(*self._args, **self._kwargs)
+
+
+
+# class IntervalQueue(queue.Queue):
+
+
+#     def __init__(self, interval=0):
+#         self.interval = interval
+#         self._last = 0
+
+#     def get(self, block=True, timeout=None):
+#         if self.interval:
+#             while (self._last + self.interval) > time.time():
+#                 gevent.sleep(self._last + self.interval - time.time() + 0.001)
+#                 # gevent.sleep(.05)
+#             self._last = time.time()
+
+#         super(IntervalQueue, self).get(block, timeout)
+
+
+
+
 
 
 class Downloader(object):
@@ -55,31 +78,50 @@ class Downloader(object):
         #     self._log = None
 
         self._count = 0
-
+        maxsize = cfg.get('thread', 4)
         self._pool = pool.Pool(cfg.get('thread', 4))
+        # self._pool = threadpool.ThreadPool(maxsize)
+        # if self.interval:
+        #     self._queue = IntervalQueue(self.interval)
+        # else:
+        #     self._queue = queue.Queue()
+        # self._queue2 = queue.Queue()
+
 
     @property
-    def count(self):
-        return self._count
-    
-    @property
-    def length(self):
+    def qsize(self):
+        # return len(self.qsize)
         return len(self._pool)
+
+
+
 
     def make_request(self, url, method='GET', **kwargs):
         return requests.Request(method, url, **kwargs)
 
-    def download(self, req, callback=None, opts=None, immediate=False):
-        self._count += 1
-        o = {'callback': callback, 'opts': opts}
-        if immediate:
-            g = gevent.spawn(self._download, req, opts)
-        else:
-            g = self._pool.spawn(self._download, req, opts)
-        c = ArgsLink(self._done, o)
-        g.rawlink(c)
 
-        return g
+    def sync_download(self, req, callback, opts=None):
+        return self.download(req, callback, opts).get()
+
+
+    def download(self, req, opts=None):
+        print self._download, ' <<============='
+        ar = self._pool.spawn(self._download, req, opts)
+        return ar
+
+    # def download(self, req, callback=None, opts=None):
+    #     ar = self._pool.spawn(self._download, req, opts)
+    #     o = {'callback': callback, 'opts': opts}
+    #     c = ArgsLink(self._done, o)
+    #     ar.rawlink(c)
+    #     return ar
+
+    # def _worker(self):
+    #     while 1:
+    #         req = self._queue.get()
+    #         ar = self._pool.spawn(self._download, req, opts)
+    #         # self._download(req)
+
 
     def _download(self, req, opts=None):
         if isinstance(req, basestring):
@@ -97,23 +139,23 @@ class Downloader(object):
         #     self.sessions[u.netloc] = sess
         # sess = self.sessions[u.netloc]
         # return sess.request('GET', url, timeout=self.timeout)
-        # print 'DD ==>> ', time.time(), req.url
+        print 'DD ==>> ', time.time(), req.url
         preq = self.session.prepare_request(req)
         return self.session.send(preq)
 
-    def _done(self, g, o):
-        self._count -= 1
-        rst = {}
-        # rst['successful'] = g.successful()
-        # rst['value'] = g.value
-        # rst['exception'] = g.exception
-        rst = DownloadResult(g.successful(), g.value, g.exception)
+    # def _done(self, g, o):
+    #     self._count -= 1
+    #     rst = {}
+    #     # rst['successful'] = g.successful()
+    #     # rst['value'] = g.value
+    #     # rst['exception'] = g.exception
+    #     rst = DownloadResult(g.successful(), g.value, g.exception)
 
-        if o and 'callback' in o:
-            if 'opts' in o and o['opts']:
-                args = (rst, o['opts'])
-            else:
-                args = (rst, {})
-            apply(o['callback'], args)
+    #     if o and 'callback' in o:
+    #         if 'opts' in o and o['opts']:
+    #             args = (rst, o['opts'])
+    #         else:
+    #             args = (rst, {})
+    #         apply(o['callback'], args)
 
-        return rst
+    #     return rst
