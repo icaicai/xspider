@@ -2,7 +2,15 @@
 
 import sys
 import gevent
-#sys.path.append('./src')
+
+import os.path
+
+d = os.path.dirname(__file__)
+sys.path.append(d)
+
+reload(sys) 
+sys.setdefaultencoding('gbk')
+
 
 
 from xspider.console import Console

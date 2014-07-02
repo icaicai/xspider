@@ -7,6 +7,7 @@ plugin_path: jd
 max_retry: 3
 max_deep: 0
 interval: 1000
+disabled: true
 headers:
     User-Agent: IE
 # sched:
@@ -29,7 +30,7 @@ headers:
 #     finished_crawl: evt_hook@db
 #     #parsed: save@dbi
 start_urls:
-    - http://www.jd.com/
+  - http://www.jd.com/
 
 # url_clear:
 #   - match: url regular
@@ -64,17 +65,5 @@ parsers:
     events:
         after_parsed: save_product_to@jd
     parse_handler: parse_price@jd
-  - name: r2
-    container: "div#left_side"
-    rules:
-      - name: title
-        selector: h1.con_title
-      - name: category
-        selector: div.perBoxfl a
-      - name: shop
-        selector: h2.perBox a
-      - name: recommand
-        selector: div.perBoxsc a
-      - name: reason
-        selector: div.nrBox
+
 

@@ -51,7 +51,7 @@ class SpiderMan(object):
             if os.path.isfile(fullpath) and ext in ('.yaml', '.yml', '.json'):
                 #cfg['__basepath__'] = path
                 s = self.init_spider(fullpath)
-                if s:
+                if s and not s.disabled:
                     self._spiders.append(s)
 
         return self._spiders
@@ -71,6 +71,13 @@ class SpiderMan(object):
             pass
         finally:
             pass
+
+
+    def get_spider(self, name):
+        for spider in self._spiders:
+            if spider.name == name:
+                return spider
+        return None
 
     def get_spiders(self):
         return self._spiders

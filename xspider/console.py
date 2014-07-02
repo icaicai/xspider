@@ -18,7 +18,7 @@ class Console(object):
         #self._start_event = Event()
         self._started = False
         self._sched = Scheduler()
-        self._spiderman = SpiderMan()        
+        self._spiderman = SpiderMan()
         gevent.signal(signal.SIGINT, self.stop)
         
         
@@ -26,12 +26,12 @@ class Console(object):
     def init(self, path):
         self._path = path
         ss = self._spiderman.load(self._path)
-        for s in ss:
-            print ' SCHED ', s._sched, self._sched, Scheduler
-            if s._sched:
-                self._sched.add(s, s._sched)
-            else:
-              s.start_crawl()
+        # for s in ss:
+        #     print ' SCHED ', s._sched, self._sched
+        #     if s._sched:
+        #         self._sched.add(s, s._sched)
+        #     else:
+        #       s.start_crawl()
 
 
     def start(self):

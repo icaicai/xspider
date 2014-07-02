@@ -2,63 +2,102 @@
 
 #from base import register_filter, register_parser
 import os.path
+import copy
 import urlparse
-from gevent.greenlet import SpawnedLink
+from gevent.greenlet import Greenlet, SpawnedLink
 from gevent.hub import greenlet, getcurrent, get_hub
+from gevent import threadpool, monkey
 # from collections import defaultdict
-from .base import EventObject
+from .base import EventObject, OptionData, merge_dict, EventMgr
 from .loader import Loader
 from .downloader import Downloader
 from .parser import Parser, ParseRule
+from .urlmgr import UrlMgr
 from .log import Logger
+from .scheduler import Scheduler
+
+thread_get_ident = monkey.get_original('thread', 'get_ident')
+
+
+# class ArgsLink(SpawnedLink):
+
+#     def __init__(self, callback, *args, **kwargs):
+#         super(ArgsLink, self).__init__(callback)
+#         self._args = args
+#         self._kwargs = kwargs
+#         # print 'c$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
+
+#     def __call__(self, source):
+#         # print '$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
+#         # g = greenlet(self.callback, get_hub())
+#         self._args = (source, ) + self._args
+#         # g.switch(*self._args, **self._kwargs)
+#         self.callback(*self._args, **self._kwargs)
 
 
 
 
-class ArgsLink(SpawnedLink):
-
-    def __init__(self, callback, *args, **kwargs):
-        super(ArgsLink, self).__init__(callback)
-        self._args = args
-        self._kwargs = kwargs
-        # print 'c$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
-
-    def __call__(self, source):
-        # print '$$$$$$$$$$$$$$$', self, hasattr(self, 'callback')
-        g = greenlet(self.callback, get_hub())
-        self._args = (source, ) + self._args
-        g.switch(*self._args, **self._kwargs)
-
-
-
-
-class Spider(EventObject):
+class Spider(object):
     """docstring for Project"""
     def __init__(self):
         super(Spider, self).__init__()
         
         self.plugin_path=None
         self.start_urls = []
-        self.default_rule = None
+        # self.default_rule = None
         self._env = {}
-        self._rules = {}
-        self._sched = None
-        self._loader = None
-        self._downloader = None
+        # self._rules = {}
+        # self._sched = None
+        # self._loader = None
+        # self._downloader = None
         self._headers = None
+        self.disabled = False
+
+        self.model = ''
+
+        #-----------------------------------
+        self._log = None
+        self._loader = None
+        self._evtmgr = None
+        self._urlmgr = None
+        self._downloader = None
+        self._parser = None
+        self._sched = Scheduler()
+        #-----------------------------------
+
+        self._stopping = True
+
 
         # self._qcount = 0            #未完成的队列长度
         self._ccount = 0            #抓取次数
 
         self._cfg_file = None
 
-        self._dld_urls = set()    #已下载或正在下载的url
 
+        self._pool = threadpool.ThreadPool(4)
+
+
+    @property
+    def evtmgr(self):
+        return self._evtmgr
+
+    @property
+    def urlmgr(self):
+        return self._urlmgr
+
+    @property
+    def parser(self):
+        return self._parser
+
+    @property
+    def log(self):
+        return self._log
+    
 
 
     def __call__(self):
         # if self._qcount > 0:
-        if self._downloader.qsize > 0:
+        if self._urlmgr.qsize > 0:
             raise Exception('Running ......')
 
         self.fire('schedule_crawl', self)
@@ -98,38 +137,41 @@ class Spider(EventObject):
             self.name = self.__class__.__name__ + str(id(self))
 
         self._log = Logger.get(self.name, logpath=cfg['__basepath__'])  #
+        self._evtmgr = EventMgr(self._log)
 
-
+        self.disabled = cfg.get('disabled', False)
+        if self.disabled:
+            print '---------------------DISABLED-------------------------', self.name
+            return
+        print '---------------------DISABLED XXX-------------------------', self.name
         #self.parse_cfg()
         self.max_retry = cfg.get('max_retry', 3)
         self.max_deep = cfg.get('max_deep', 3)
 
 
-        if 'plugin_path' in cfg:
-            self.plugin_path = os.path.join(cfg['__basepath__'], cfg['plugin_path'])
 
-            #self.load_plugins(plugin_path)
+
 
         if 'start_urls' in cfg:
             self.start_urls = cfg['start_urls']
             
-      
-        if 'sched' in cfg:
-            self._sched = cfg['sched']
+
+
 
 
 
         # 插件
-        if self.plugin_path:
-            self._loader = Loader(self.plugin_path)
+        if 'plugin_path' in cfg:
+            self.plugin_path = os.path.join(cfg['__basepath__'], cfg['plugin_path'])
+            self._loader = Loader(self.plugin_path, self)
         
         # 插件自定义变量
-        if self.cfg.get('variable'):
-            self._env.update(self.cfg.get('variable'))
+        if cfg.get('variable'):
+            self._env.update(cfg.get('variable', {}))
 
         # 插件环境初始化
-        if self.cfg.get('initialize'):
-            inits = self.cfg.get('initialize')
+        if cfg.get('initialize'):
+            inits = cfg.get('initialize')
             for it in inits:
                 m = self.load(it['name'])
                 if m:
@@ -140,6 +182,13 @@ class Spider(EventObject):
 
         #print self._env
 
+        #链接管理
+        ucfg = cfg.get('urlmgr', {})
+        ucfg['db'] = os.path.join(cfg['__basepath__'], "%s_url.db" % self.name)
+        self._urlmgr = UrlMgr(ucfg, self)
+        self._urlmgr.load()
+
+
         # 下载
         c = {}
         c['timeout'] = 30
@@ -147,53 +196,35 @@ class Spider(EventObject):
         if 'headers' in cfg:
             c['headers'] = cfg['headers']
 
-        print 'Downloader header ------------->', c
-        self._downloader = Downloader(c)
+        self._downloader = Downloader(c, self)
+        self._downloader.add_callback(self._download_finished)
 
         # 解析器
         pc = {}
-        if 'allow_domain' in cfg:
-            pc['allow_domain'] = cfg['allow_domain']
-        pc['rules'] = cfg.get('parsers')
+        pc['allow_domain'] = cfg.get('allow_domain')
+        pc['link_filter'] = cfg.get('link_filter')
+        pc['collect_links'] = cfg.get('collect_links', True)
+        pc['rules'] = cfg.get('parser')
         self._parser = Parser(pc, self)
-
-        # 规则及事件
-        # if 'parsers' in cfg:
-        #     for rcfg in cfg['parsers']:
-        #         name = rcfg['name']
-        #         #parse_rules = rule['parsers']
-        #         robj = ParseRule(rcfg, spider)
-        #         self._rules[name] = robj
-        #         if robj.is_default() or self.default_rule is None:
-        #             self.default_rule = name
-        #         # print 'rules -->>', name, robj.events
-        #         if robj.events:
-        #             for en in robj.events:
-        #                 evt = robj.events[en]
-        #                 func = self.load(evt)
-        #                 if func and callable(func):
-        #                     ename = '%s_%s' % (name, en)
-        #                     self.add_listener(ename, func)
-        #                     self._log.info(u"监听规则 %s 事件 %s" % (name, evt))
-
-        #     for rn in self._rules:
-        #         rule = self._rules[rn]
-
-        # else:
-        #     raise Exception("No Rule")
 
 
         # 事件
-        if 'events' in self.cfg:
-            evts = self.cfg['events']
+        if 'events' in cfg:
+            evts = cfg['events']
             for evt in evts:
                 func = self.load(evts[evt])
                 if func and callable(func):
-                    self.add_listener(evt, func)
-                    self._log.info(u"监听事件 %s" % evt)
+                    # self.add_listener(evt, func)
+                    self._evtmgr.add_listener(evt, func)
 
 
+        if 'sched' in cfg:
+            # self._sched = cfg['sched']
+            self._sched.add(self, cfg['sched'])
+        else:
+            self._sched.add(self.start_crawl, None)
 
+        self._sched.add(self._urlmgr.sync, {'type': 'interval', 'seconds': 30})
 
 
 
@@ -221,6 +252,8 @@ class Spider(EventObject):
     def load(self, name):
         """加载插件"""
 
+        # self._log.info(u'加载插件 %s' % name)
+
         if '@' in name:
             func, mod = name.split('@', 1)
         else:
@@ -235,12 +268,17 @@ class Spider(EventObject):
         if self._loader is None:
             return
 
-        env = {}
-        env['get_var'] = self.get_var
-        env['set_var'] = self.set_var
-        env['get_cfg'] = self.get_cfg
-        env['_download'] = self._download
-        obj = self._loader.load(mod, env)
+        # env = {}
+        # env['get_var'] = self.get_var
+        # env['set_var'] = self.set_var
+        # env['get_cfg'] = self.get_cfg
+        # env['_download'] = self._sync_download
+        # env['_spider'] = self
+        try:
+            obj = self._loader.load(mod)
+        except:
+            self._log.exception(u'加载 %s 异常' % name)
+            return 
 
         if obj and func:
             return getattr(obj, func, None)
@@ -260,150 +298,232 @@ class Spider(EventObject):
     #     return self._rules.get(name)
 
 
-    def clear(self, url):
-        o = urlparse.urlparse(url)
+    # def clear(self, url):
+    #     o = urlparse.urlparse(url)
 
-        return url
+    #     return url
 
 
     def _download_finished(self, rlt, opts):
+        print '----- _download_finished', thread_get_ident(), rlt.successful
+        self._pool.spawn(self._parse_resp, rlt, opts)
+
+
+    def _parse_resp(self, rlt, opts):
         # print '------------------------_download_finished----------------------------'
-        resp = None
-        exce = None
-        url = None
 
-        try:
-            if rlt.successful(): #下载成功
-                resp = rlt.value
-                url = resp.url
-
-                rule = None
-                if opts and 'rule' in opts:
-                    rule = self._parser.get_rule(opts['rule'])
-
-                if not rule:
-                    rule = self._parser.guess_rule(url)
-
-                print 'GUESS RULE ==>>> ', rule and rule.name
-
-                evt_name = []
-                if rule:
-                    evt_name.append('%s_after_download' % rule.name)
-                evt_name.append('after_download')
-                ret = self.fire(evt_name, rlt, opts)
-
-                html = resp.text
-                result, links = self._parser.parse(resp, rule)
-
-                if links:
-                    self._download_links(links, {'referer': url})
-                # fp = open('urls.txt', 'w')
-                # fp.write('\n'.join(links))
-                # fp.close()
-
-                evt_name = []
-                if rule:
-                    evt_name.append('%s_after_parsed' % rule.name)
-                    evt_name.append('after_parsed')
-                    self.fire(evt_name, result, opts)
-
-            else:   #下载失败
-                exce = rlt.exception
-                print exce
-                self._log.error(u'下载出错', exc_info=exce)
-                if not opts:
-                    opts = {}
-
-                #重试
-                if 'url' in opts:
-                    url = opts['url']
-                    if not 'retry' in opts:
-                        opts['retry'] = 0
-
-                    if opts['retry'] < self.max_retry:
-                        opts['retry'] += 1
-
-                        self._dld_urls.remove(url)    
-                        self._download(url, opts)                
-        except:
-            self._log.exception(u'处理内容时出错 %s' % opts.get('url'))    
-        # finally:
-        #     self._qcount -= 1
+        url = rlt.value.url if rlt.value and hasattr(rlt.value, 'url') else None
+        oul = opts['__url__'] if opts and '__url__' in opts else None
 
 
-        # print '-------------++++++++++++++++', self._qcount, self._ccount
+        rule = None
+        if opts and 'rule' in opts:
+            rule = self._parser.get_rule(opts['rule'])
 
-        # if self._qcount == 0:
-        if self._downloader.qsize == 0:
-            self._ccount += 1
-            self.fire('finished_crawl', self)
-            self._log.info(u'完成抓取 %s' % self._ccount)
+        if not rule:
+            rule = self._parser.guess_rule(url)
+
+        if not rule and opts and 'default_rule' in opts:
+            rule = self._parser.get_rule(opts['default_rule'])
 
 
-    def _download_links(self, urls, o):
-        for url in urls:
-            self._download(url, o.copy())
-            # return
+        # self.evtmgr.fire('')
 
-    def _download(self, url, o=None, immediate=False):
-        #self.fire('before_download', url, o)
-        
-        try:
-            # rule_name = o and o.get('rule') or None
-            # url = self.clear(url)
-            if not url:
-                return
 
-            if url in self._dld_urls:   #是否已经下载或正在下载
-                ret = self.fire('reduplicated', url)            
-                return
+        if rlt.value:
+            resp = rlt.value
+            url = resp.url
+            
 
-            if not o:
-                o = {}
-            o['url'] = url
-            hds = {}
-            if 'referer' in o:
-                hds['referer'] = o['referer']
+            if oul and url != oul:
+                self._urlmgr.alias(oul, url)
 
-            # print 'Req header -------------> b4', hds
-            req = self._downloader.make_request(url, headers=hds)
+            changed = self._urlmgr.update(url, response=resp, status=resp.status_code)
 
-            # print 'Req header ------------->', req.headers
+            if changed:
+                if resp.status_code == 200:
+                    try:
+                        result, links = self._parser.parse(resp, rule)
+                        # print result, links
+                        print 'unfinished_tasks ==== ', self._urlmgr.qsize
+                        # self.evtmgr.fire()
+                    except:
+                        self._log.exception(u'页面内容处理异常 %s' % url)
+                    else:
 
-            ret = self.fire('before_request', req, o)
-            if ret is not False:
-                # g = self._downloader.download(req, self._download_finished, o, immediate)
-                g = self._downloader.download(req)
-                c = ArgsLink(self._download_finished, o)
-                g.rawlink(c)
-                # print g
-        except:
-            self._log.exception(u'新增到下载队列时出错 %s' % url)
+                        hds = {'referer': url}
+                        data = None
+                        if opts and 'data' in opts:
+                            data = opts['data']
+
+                        if links and not self._stopping:    #<---------------------------------------------------STOPPING----------------
+                            # print '-------------------------------'
+                            # print links
+                            # print '**************************************'
+                            urls = set()
+
+                            for link in links:
+                                opt = None
+                                if type(link) is tuple:
+                                    opt = link[1]
+                                    nul = link[0]
+                                elif not isinstance(link, basestring):
+                                    opt = link.options
+                                    nul = link.url
+                                else:
+                                    nul = link
+               
+                                if opt:
+                                    if 'headers' in opt:
+                                        opt['headers'].update(hds)
+
+                                    if data:
+                                        if 'data' in opt:
+                                            d = copy.deepcopy(data)
+                                            d.update(opt['data'])
+                                            opt['data'] = d
+                                        else:
+                                            opt['data'] = data
+
+                                prior = opt and opt.get('prior') or True
+                                
+                                self._urlmgr.put(nul, opt, prior)
+
+                                urls.add(nul)
+
+
+                            evts = ['new_links']
+                            if rule:
+                                evts.insert(0, '%s_new_links' % rule.name)
+                            self._evtmgr.fire(evts, urls, {'referer': url}, self)
+
+
+                        if type(result) is tuple:
+                            result, l = result
+                            for link in l:
+                                opt = None
+                                if type(link) is tuple:
+                                    opt = link[1]
+                                    nul = link[0]
+                                elif not isinstance(link, basestring):
+                                    opt = link.options
+                                    nul = link.url
+                                else:
+                                    nul = link
+               
+                                if opt:
+                                    if 'headers' in opt:
+                                        opt['headers'].update(hds)
+
+                                    if data:
+                                        if 'data' in opt:
+                                            d = copy.deepcopy(data)
+                                            d.update(opt['data'])
+                                            opt['data'] = d
+                                        else:
+                                            opt['data'] = data
+
+                                prior = opt and opt.get('prior') or True
+                                
+                                self._urlmgr.put(nul, opt, prior)                                
+
+
+                        evts = ['after_parsed']
+                        if rule:
+                            evts.insert(0, '%s_after_parsed' % rule.name)
+
+                        od = OptionData()
+                        od.options = opts
+                        od.response = resp
+                        od.url = url
+                        od.rule = rule
+                        self._evtmgr.fire(evts, result, od)
+
+                else:
+                    self._log.warning(u'返回状态码 %s  status_code=%s' % (url, resp.status_code))
+            else:  ## status code
+                self._log.warning(u'内容没变动，无需重新处理 %s' % url)
+
         else:
-            self._dld_urls.add(url)
-            # self._qcount += 1
+
+            if not opts:
+                opts = {}
+            if not 'retry' in opts:
+                opts['retry'] = 0
+
+            exce = rlt.exception
+            self._log.error(u'下载失败 <%s>: %s' % (opts['retry']+1, url or oul), exc_info=exce)
+
+            if not url and not oul:
+                print url, oul, rlt.value, rlt
+                self._log.warning('URL IS NONE')
+                return
+
+
+
+            if opts['retry'] < self.max_retry:
+                opts['retry'] += 1
+
+                self._urlmgr.put(url or oul, opts)
+
+        
+
+        if self._urlmgr.qsize == 0 and len(self._pool) == 0:
+            pass
+
+
+        #         evt_name = []
+        #         if rule:
+        #             evt_name.append('%s_after_parsed' % rule.name)
+        #         evt_name.append('after_parsed')
+        #         od = OptionData()
+        #         od.options = opts
+        #         od.response = resp
+        #         od.url = url
+        #         od.rule = rule
+        #         # o = {'options': opts, 'response': resp, 'url': url, 'rule': rule}
+        #         self.fire(evt_name, result, od)
+
+
+        # # if self._qcount == 0:
+        # print 'qsize %s -- %s -- th %s' % (self._downloader.qsize, thread_get_ident(), len(self._pool))
+        # if self._downloader.qsize == 0 and len(self._pool) == 1:
+        #     self._ccount += 1
+        #     self.fire('finished_crawl', self)
+        #     self._log.info(u'完成抓取 %s' % self._ccount)
+
+    def fetch(self, url, opts):
+        return self._downloader.download(url, opts)
 
 
 
     def start_crawl(self, urls=None, opts=None):
         self._log.info("==========START==========")
+        print thread_get_ident()
         if urls is None:
             urls = self.start_urls
 
-        self._dld_urls.clear()   #新的开始
 
-        if isinstance(urls, basestring):
-            urls = [urls]
+        if self._urlmgr.qsize == 0:  
+            if isinstance(urls, basestring):
+                urls = [urls]
 
-        self.fire('start_crawl', urls, self)
+            # self.fire('start_crawl', urls, self)
 
-        for url in urls:
-            self._download(url)
+            for url in urls:
+                self._urlmgr.put(url, force=True)
+
+        print 'unfinished_tasks start', self._urlmgr.qsize
+        self._downloader.start()
+        self._stopping = False
 
 
     def stop(self):
         """"""
         self._log.info("==========STOP==========")
+        # self._downloader.stop()
+        # self._pool.kill()
+        self._stopping = True
     
     def get_info(self):
         """"""

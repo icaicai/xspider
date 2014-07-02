@@ -1,4 +1,4 @@
-
+#coding=utf8
 
 
 
@@ -9,7 +9,7 @@ from gevent.event import Event
 from gevent.pool import Group
 from datetime import datetime, timedelta
 from .base import Singleton
-
+from .log import Logger
 
 
 MIN_VALUES = {'year': 1970, 'month': 1, 'day': 1, 'week': 1,
@@ -18,6 +18,8 @@ MAX_VALUES = {'year': 2 ** 63, 'month': 12, 'day': 31, 'week': 53,
               'day_of_week': 6, 'hour': 23, 'minute': 59, 'second': 59}
 FIELDS = ['year', 'month', 'day', 'hour', 'minute', 'second']
 FIELDS2 = ['days', 'seconds', 'minutes', 'hours', 'weeks']
+
+_log = Logger.get('SpiderMan')
 
 def convert2datetime(dateval, format=None):
     if isinstance(dateval, float):
@@ -40,7 +42,7 @@ class Job(object):
     def __init__(self, sched, func):
         super(Job, self).__init__()
 
-        self._id = 'id' in sched and sched['id'] or 'id_'+str(id(self))
+        self._id = sched['id'] if sched and 'id' in sched else 'id_'+str(id(self))
 
         self._init(sched)
 
@@ -48,6 +50,10 @@ class Job(object):
         self._count = 0
 
         self._func = func
+
+        self._last_run_time = datetime.now()
+
+
 
 
 
@@ -65,6 +71,8 @@ class Job(object):
         pass
 
     def _init(self, sched):
+        if not sched:
+            sched = {}
         self._sched_start_time = None
         self._sched_end_time = None
         self._sched_repeat = sched.get('repeat', None)
@@ -87,6 +95,8 @@ class Job(object):
                 self._sched_start_time = datetime.now() + self._sched_config['interval']
         else:
             self._sched_type = None
+
+
 
         print self._sched_type, self._sched_config
             
@@ -122,15 +132,24 @@ class Job(object):
         return _next
 
     def _interval_next_tirgger(self, now):
-        delta = now - self._sched_start_time
+        _start_time = max(self._sched_start_time, self._last_run_time)
+        delta = now - _start_time
         delta_seconds = delta.days * 24 * 60 * 60 + delta.seconds + delta.microseconds / 1000000.0
+        # l = delta_seconds/self._sched_config['length']
+        # if l < 0.001:
+        #     num = 0
+        # else:
+        #     num = math.ceil(l)
         num = math.ceil(delta_seconds/self._sched_config['length'])
         sec = self._sched_config['length'] * num
-        _next = self._sched_start_time + timedelta(seconds=sec)
+        _next = _start_time + timedelta(seconds=sec)
         return _next
 
     def get_next_tirgger(self, now):
         #now = datetime.now()
+
+        _log.info('$$$===--- %s %s %s' % (now, self._last_run_time, self._running))
+
         if self._sched_start_time and now < self._sched_start_time:
             return self._sched_start_time
 
@@ -152,20 +171,26 @@ class Job(object):
         pass
 
     def run(self):
-        print ' --+++--> ', self._id, ' Im Run!!!!', datetime.now()
-        def _on_finished():
-            print ' --+++--> ', self._id, ' Im Finished!!!!'
-            self._running = False
-            self._count += 1
+        _log.info(' --+++--> %s Im Run!!!! %s' % (self._id, datetime.now()))
+
+        if self._running:
+            _log.info(' --STOP-> %s Im Run!!!! %s' % (self._id, datetime.now()))
+            return
 
         self._running = True
+        self._last_run_time = datetime.now()
         try:
+            # self._count += 1
             self._func()
+            # self._running = False
         except Exception,e:
             self._running = False
-            raise e
+            _log.exception(u'运行Job异常 %s' % self._id)
 
 
+    def done(self, g):
+        self._running = False
+        self._count += 1
 
 
 class Scheduler(Singleton):
@@ -176,6 +201,7 @@ class Scheduler(Singleton):
         self._jobs = []
         self._jobs_thread = Group()
         self._start = False
+        self._missfire = timedelta(seconds=1)
 
     def add(self, func, sched):
         job = Job(sched, func)
@@ -199,9 +225,11 @@ class Scheduler(Singleton):
     def add_job(self, job):
         self._jobs.append(job)
         self._event.set()
+        _log.info(u'新增Job %s' % job._id)
 
     def _run_job(self, job):
-        self._jobs_thread.spawn(job.run)
+        g = self._jobs_thread.spawn(job.run)
+        g.link(job.done)
         #gevent.spawn(job.run)
 
     def _run(self):
@@ -212,16 +240,18 @@ class Scheduler(Singleton):
             now = datetime.now()
             for job in self._jobs:
                 wakeup = job.get_next_tirgger(now)
-                print ' --> ', now, wakeup
+                _log.info(' $$--> ID: %s NOW: %s WAKEUP: %s' % (job._id, now, wakeup))
                 if wakeup is None:
                     finished.append(job)
-                elif wakeup <= now:
+                elif (wakeup - self._missfire) <= now: #
                     self._run_job(job)
                 else:
                     pass
 
             for job in finished:
                 self._jobs.remove(job)
+
+            self._jobs_thread.join()
 
             now = datetime.now()
             for job in self._jobs:
@@ -231,9 +261,9 @@ class Scheduler(Singleton):
             print 'Next Run -> ', _next, ' <-'
             self._event.clear()
             if _next:
-                t = (_next-now).total_seconds()
+                t = (_next-now).total_seconds() - 0.5
                 #self._thread = gevent.spawn_later(t, self._run)
-                print '============>', t
+                _log.info('============> %s' % t)
                 self._event.wait(t)
             else:
                 print '_________WAIT__________'
